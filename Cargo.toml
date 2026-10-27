@@ -1,0 +1,17 @@
+[workspace]
+resolver = "3"
+members = ["wtm-core", "wtm"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "GPL-2.0-only"
+authors = ["Max Sikström <max@pengi.se>"]
+repository = "https://github.com/pengi/wtm"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

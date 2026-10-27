@@ -1,0 +1,22 @@
+[package]
+name = "wtm-core"
+description = "Core library of wtm, a manager for bare git repositories and their worktrees"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+etcetera = "0.10.0"
+git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+toml = "1.1.8"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints]
+workspace = true
