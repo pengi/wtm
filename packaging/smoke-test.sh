@@ -6,6 +6,7 @@
 set -eux
 
 wtm --version
+command -v curl
 test -f /usr/share/bash-completion/completions/wtm
 test -f "$1"
 test -f /usr/share/man/man1/wtm.1.gz
@@ -35,6 +36,7 @@ wtm drop side
 wtm drop demo
 wtm unregister demo
 wtm shell-init bash > /dev/null
+wtm auth list
 
 set +x
 echo "smoke test passed"

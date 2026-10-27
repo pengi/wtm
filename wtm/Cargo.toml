@@ -34,7 +34,7 @@ extended-description = """\
 wtm keeps a pool of git checkouts: registered upstream repositories are \
 kept as bare repositories in one directory, and any number of worktrees \
 are created from them in another."""
-depends = "git (>= 1:2.30)"
+depends = "git (>= 1:2.30), curl"
 section = "vcs"
 priority = "optional"
 assets = [
@@ -58,3 +58,4 @@ assets = [
 
 [package.metadata.generate-rpm.requires]
 git = ">= 2.30"
+curl = "*"
