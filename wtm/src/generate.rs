@@ -108,11 +108,15 @@ fn write_args(out: &mut String, args: &[&Arg]) {
         if arg.is_positional() && !possible.is_empty() {
             let _ = write!(line, " One of: {}.", possible.join(", "));
         }
-        let defaults: Vec<String> = arg
-            .get_default_values()
-            .iter()
-            .map(|v| format!("`{}`", v.to_string_lossy()))
-            .collect();
+        // Flags have the default "false", which says nothing.
+        let defaults: Vec<String> = if arg.get_action().takes_values() {
+            arg.get_default_values()
+                .iter()
+                .map(|v| format!("`{}`", v.to_string_lossy()))
+                .collect()
+        } else {
+            Vec::new()
+        };
         if !defaults.is_empty() {
             let _ = write!(line, " (default: {})", defaults.join(", "));
         }

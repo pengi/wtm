@@ -25,6 +25,7 @@ pub struct Cli {
 }
 
 #[derive(Args)]
+#[command(next_help_heading = "Global options")]
 pub struct GlobalArgs {
     /// Config file [env: WTM_CONFIG] [default: ~/.config/wtm/config.toml]
     #[arg(long, global = true, value_name = "FILE")]
@@ -60,6 +61,7 @@ pub enum Command {
     /// Deletes the bare repository. Refused while the repository has
     /// worktrees, or has branches with commits that are on no remote.
     Unregister {
+        /// Registered repository
         #[arg(add = ArgValueCandidates::new(complete::repos))]
         repo: String,
         /// Delete even if branches have commits that are on no remote
@@ -82,6 +84,7 @@ pub enum Command {
     /// repositories if none are given. Branches deleted on a remote are
     /// removed from the remote-tracking branches.
     Fetch {
+        /// Registered repositories [default: all]
         #[arg(add = ArgValueCandidates::new(complete::repos))]
         repos: Vec<String>,
     },
@@ -97,6 +100,7 @@ pub enum Command {
     /// tracking it is created. Otherwise a new branch is created from START
     /// (default: the remote's default branch), without upstream.
     New {
+        /// Registered repository
         #[arg(add = ArgValueCandidates::new(complete::repos))]
         repo: String,
         /// Name of the worktree [default: REPO]
@@ -140,6 +144,7 @@ pub enum Command {
     /// uncommitted changes, untracked files that are not ignored, an
     /// operation in progress, a lock, or commits that are on no remote.
     Drop {
+        /// Worktree
         #[arg(add = ArgValueCandidates::new(complete::worktrees))]
         name: String,
         /// Drop even if something would be lost
@@ -158,6 +163,7 @@ pub enum Command {
     /// Without NAME, prints the checkouts directory. Meant for scripts and
     /// shell functions such as `cd "$(wtm locate NAME)"`.
     Locate {
+        /// Worktree
         #[arg(add = ArgValueCandidates::new(complete::worktrees))]
         name: Option<String>,
         /// Print the path of the bare repository NAME instead (or of the
@@ -184,6 +190,7 @@ pub enum Command {
     ///
     ///     eval "$(wtm shell-init zsh)"
     ShellInit {
+        /// Shell to integrate with
         shell: Shell,
         /// Name of the change-directory function
         #[arg(long, default_value = "wcd")]
@@ -199,14 +206,18 @@ pub enum Command {
 pub enum RemoteCommand {
     /// List the remotes of a repository
     List {
+        /// Registered repository
         #[arg(add = ArgValueCandidates::new(complete::repos))]
         repo: String,
     },
     /// Add a remote and fetch it
     Add {
+        /// Registered repository
         #[arg(add = ArgValueCandidates::new(complete::repos))]
         repo: String,
+        /// Name of the remote
         name: String,
+        /// URL of the remote, as given to `git clone`
         url: String,
         /// Don't fetch the new remote
         #[arg(long)]
@@ -217,15 +228,19 @@ pub enum RemoteCommand {
     },
     /// Remove a remote and its remote-tracking branches
     Remove {
+        /// Registered repository
         #[arg(add = ArgValueCandidates::new(complete::repos))]
         repo: String,
+        /// Remote
         #[arg(add = ArgValueCandidates::new(complete::remotes))]
         name: String,
     },
     /// Set the remote that `new` fetches and tracks by default
     SetDefault {
+        /// Registered repository
         #[arg(add = ArgValueCandidates::new(complete::repos))]
         repo: String,
+        /// Remote
         #[arg(add = ArgValueCandidates::new(complete::remotes))]
         name: String,
     },
@@ -234,9 +249,15 @@ pub enum RemoteCommand {
 #[derive(Subcommand)]
 pub enum Generate {
     /// Man pages, into DIR
-    Man { dir: PathBuf },
+    Man {
+        /// Output directory
+        dir: PathBuf,
+    },
     /// Completion script for installing system-wide
-    Completion { shell: Shell },
+    Completion {
+        /// Shell to generate for
+        shell: Shell,
+    },
     /// Command reference in Markdown
     Markdown,
 }
