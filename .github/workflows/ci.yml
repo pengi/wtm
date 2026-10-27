@@ -42,3 +42,19 @@ jobs:
           git config --global user.name "wtm CI"
           git config --global user.email "ci@example.invalid"
       - run: cargo test --workspace
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r docs/requirements.txt
+      - name: Check that the command reference is up to date
+        run: |
+          cargo run -q -p wtm -- generate markdown > docs/reference/commands.md
+          git diff --exit-code docs/reference/commands.md
+      - run: properdocs build --strict

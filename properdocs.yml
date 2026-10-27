@@ -1,0 +1,21 @@
+site_name: wtm
+site_description: Worktree manager for git
+repo_url: https://github.com/pengi/wtm
+edit_uri: ""
+
+theme:
+  name: mkdocs
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Installation: install.md
+  - Getting started: getting-started.md
+  - Configuration: configuration.md
+  - Repositories: repositories.md
+  - Worktrees: worktrees.md
+  - Command reference: reference/commands.md
