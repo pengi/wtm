@@ -25,6 +25,7 @@ top of git: everything it knows, it reads from the repositories themselves.
 - [Installation](install.md)
 - [Getting started](getting-started.md)
 - [Configuration](configuration.md)
+- [Accounts](accounts.md): GitHub and GitLab
 - [Repositories](repositories.md) and [worktrees](worktrees.md): what wtm
   stores
 - [Command reference](reference/commands.md)

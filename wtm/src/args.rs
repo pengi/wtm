@@ -46,8 +46,14 @@ pub enum Command {
     ///
     /// Creates a bare repository named NAME in the repos directory, with
     /// SOURCE as its remote, and fetches it. No worktree is created.
+    ///
+    /// SOURCE is a URL, or ACCOUNT:PATH for a repository on an account's
+    /// service, e.g. `github:owner/repo`. A PATH without owner is the
+    /// account user's own repository.
     Register {
-        /// URL of the upstream repository, as given to `git clone`
+        /// URL of the upstream repository, as given to `git clone`, or
+        /// ACCOUNT:PATH
+        #[arg(add = ArgValueCandidates::new(complete::account_sources))]
         source: String,
         /// Name of the repository [default: derived from SOURCE]
         name: Option<String>,
@@ -75,6 +81,29 @@ pub enum Command {
         /// Leave the worktree where the clone is
         #[arg(long)]
         keep_path: bool,
+    },
+
+    /// Manage accounts on upstream services (GitHub, GitLab)
+    ///
+    /// Accounts are kept in the config file. Their tokens are kept by git's
+    /// credential helpers, the same way git keeps HTTPS passwords.
+    #[command(subcommand)]
+    Auth(AuthCommand),
+
+    /// Search repositories on an account's service
+    ///
+    /// Lists repositories you own or are a member of, matching QUERY if
+    /// given. With --all, searches all repositories visible to you (QUERY
+    /// is then required). Register one with `wtm register ACCOUNT:PATH`.
+    Search {
+        /// Account to search with
+        #[arg(add = ArgValueCandidates::new(complete::accounts))]
+        account: String,
+        /// Text to look for in names and descriptions
+        query: Option<String>,
+        /// Search all visible repositories, not just your own
+        #[arg(long)]
+        all: bool,
     },
 
     /// Remove a registered repository
@@ -265,6 +294,70 @@ pub enum RemoteCommand {
         #[arg(add = ArgValueCandidates::new(complete::remotes))]
         name: String,
     },
+}
+
+#[derive(Subcommand)]
+pub enum AuthCommand {
+    /// Add an account
+    ///
+    /// Asks for an access token, unless git's credential helper already has
+    /// one for URL (for example from `gh auth login`). The token is checked
+    /// against the service and stored with git's credential helper. Without
+    /// a token, only public repositories can be looked up.
+    ///
+    /// GitHub tokens need the `repo` scope (or read access to the
+    /// repositories, for fine-grained tokens); GitLab tokens `read_api`.
+    Add {
+        /// Name of the account, used as ACCOUNT in `ACCOUNT:PATH`
+        name: String,
+        /// Kind of service
+        kind: AccountKind,
+        /// Web address of the service [default: https://github.com or
+        /// https://gitlab.com]
+        #[arg(long)]
+        url: Option<String>,
+        /// Your user name [default: the token's user]
+        #[arg(long)]
+        user: Option<String>,
+        /// Clone URL to register repositories with
+        #[arg(long, value_enum, default_value_t = Protocol::Ssh)]
+        protocol: Protocol,
+        /// Read the token from standard input instead of asking
+        #[arg(long)]
+        token_stdin: bool,
+    },
+    /// List accounts
+    List,
+    /// Check that accounts' tokens work
+    Check {
+        /// Account [default: all]
+        #[arg(add = ArgValueCandidates::new(complete::accounts))]
+        name: Option<String>,
+    },
+    /// Remove an account from the config file
+    ///
+    /// The token stays with git's credential helper, since git may use it
+    /// for HTTPS, unless --forget-token is given.
+    Remove {
+        #[arg(add = ArgValueCandidates::new(complete::accounts))]
+        /// Account
+        name: String,
+        /// Also remove the token from git's credential helper
+        #[arg(long)]
+        forget_token: bool,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub enum AccountKind {
+    Github,
+    Gitlab,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub enum Protocol {
+    Ssh,
+    Https,
 }
 
 #[derive(Subcommand)]

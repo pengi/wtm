@@ -21,6 +21,22 @@ checkouts_dir = "~/src"
 Paths must be absolute or start with `~/`. Unknown keys are an error, so
 typos don't go unnoticed.
 
+Accounts on upstream services are also kept here, one table per account.
+`wtm auth add` writes them, keeping the rest of the file as it is:
+
+```toml
+[accounts.github]
+kind = "github"        # or "gitlab"
+user = "you"           # your user name; set from the token if not given
+
+[accounts.work]
+kind = "gitlab"
+url = "https://gitlab.example.com"   # default: github.com / gitlab.com
+protocol = "https"     # clone URL to register with; default "ssh"
+```
+
+See [accounts](accounts.md).
+
 ## Overriding
 
 Each setting can also be given as an environment variable or a command line

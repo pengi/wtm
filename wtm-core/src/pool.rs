@@ -3,15 +3,17 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::config::Config;
+use crate::config::{self, Account, Config};
 use crate::error::{Error, Result};
-use crate::git::{Checkout, DefaultBackend, GitBackend, Head};
+use crate::git::{Checkout, Credential, DefaultBackend, GitBackend, Head};
 use crate::model::{
     Created, DropBlocker, DropOptions, Dropped, NewWorktree, Repo, RepoDetails, Worktree,
     WorktreeState,
 };
 use crate::name;
-use crate::source::{SourceResolver, UrlResolver};
+use crate::source::{ResolvedSource, SourceResolver, UrlResolver, split_account_source};
+use crate::upstream::http::{CurlClient, HttpClient};
+use crate::upstream::{self, RemoteRepo, SearchScope, UpstreamProvider};
 
 /// Config key in a bare repository naming its default remote.
 const DEFAULT_REMOTE_KEY: &str = "wtm.defaultRemote";
@@ -42,10 +44,18 @@ pub struct Repaired {
     pub worktrees: Vec<PathBuf>,
 }
 
+/// An account that was just added.
+#[derive(Debug)]
+pub struct AccountAdded {
+    pub account: Account,
+    /// The user the token belongs to, if there is a token.
+    pub login: Option<String>,
+}
+
 pub struct Pool<B: GitBackend = DefaultBackend> {
     config: Config,
     git: B,
-    resolvers: Vec<Box<dyn SourceResolver>>,
+    http: Box<dyn HttpClient>,
 }
 
 impl<B: GitBackend> Pool<B> {
@@ -53,8 +63,14 @@ impl<B: GitBackend> Pool<B> {
         Pool {
             config,
             git,
-            resolvers: vec![Box::new(UrlResolver)],
+            http: Box::new(CurlClient),
         }
+    }
+
+    /// Use another HTTP client for upstream services.
+    pub fn with_http(mut self, http: Box<dyn HttpClient>) -> Self {
+        self.http = http;
+        self
     }
 
     pub fn config(&self) -> &Config {
@@ -160,11 +176,12 @@ impl<B: GitBackend> Pool<B> {
         name: Option<&str>,
         remote_name: &str,
     ) -> Result<Registered> {
-        let resolved = self
-            .resolvers
-            .iter()
-            .find_map(|r| r.resolve(source))
-            .ok_or_else(|| Error::UnknownSource(source.to_string()))?;
+        let resolved = match (AccountResolver { pool: self }).resolve(source)? {
+            Some(resolved) => resolved,
+            None => UrlResolver
+                .resolve(source)?
+                .ok_or_else(|| Error::UnknownSource(source.to_string()))?,
+        };
         let name = name.unwrap_or(&resolved.suggested_name).to_string();
         name::validate(&name)?;
         name::validate(remote_name)?;
@@ -346,6 +363,85 @@ impl<B: GitBackend> Pool<B> {
             path: target,
             head: info.head,
         })
+    }
+
+    // Accounts
+
+    pub fn account(&self, name: &str) -> Result<&Account> {
+        self.config
+            .account(name)
+            .ok_or_else(|| Error::AccountNotFound(name.to_string()))
+    }
+
+    /// The account's token, from git's credential helpers.
+    pub fn token(&self, account: &Account) -> Result<Option<String>> {
+        Ok(self
+            .git
+            .credential_fill(&account.url, account.user.as_deref())?
+            .map(|c| c.password))
+    }
+
+    /// The API of an account's service, authenticated if there is a token.
+    pub fn upstream(&self, account: &Account) -> Result<Box<dyn UpstreamProvider + '_>> {
+        let token = self.token(account)?;
+        Ok(upstream::provider(account, token, self.http.as_ref()))
+    }
+
+    /// Add an account to the config file. The token, given or found in
+    /// git's credential helpers, is checked against the service first. A
+    /// given token is stored with the credential helpers.
+    pub fn add_account(&self, mut account: Account, token: Option<String>) -> Result<AccountAdded> {
+        if self.config.account(&account.name).is_some() {
+            return Err(Error::AccountExists(account.name));
+        }
+        let given = token.is_some();
+        let token = match token {
+            Some(token) => Some(token),
+            None => self.token(&account)?,
+        };
+        let login = match &token {
+            Some(token) => Some(
+                upstream::provider(&account, Some(token.clone()), self.http.as_ref())
+                    .current_user()?,
+            ),
+            None => None,
+        };
+        if account.user.is_none() {
+            account.user = login.clone();
+        }
+        if given && let Some(password) = token {
+            self.git.credential_approve(&Credential {
+                url: account.url.clone(),
+                username: account.user.clone(),
+                password,
+            })?;
+        }
+        config::write_account(&self.config.file.value, &account)?;
+        Ok(AccountAdded { account, login })
+    }
+
+    /// Remove an account from the config file, and with `forget_token` its
+    /// token from git's credential helpers.
+    pub fn remove_account(&self, name: &str, forget_token: bool) -> Result<()> {
+        let account = self.account(name)?;
+        if forget_token
+            && let Some(credential) = self
+                .git
+                .credential_fill(&account.url, account.user.as_deref())?
+        {
+            self.git.credential_reject(&credential)?;
+        }
+        config::remove_account(&self.config.file.value, name)?;
+        Ok(())
+    }
+
+    pub fn search(
+        &self,
+        account: &Account,
+        query: Option<&str>,
+        scope: SearchScope,
+    ) -> Result<Vec<RemoteRepo>> {
+        Ok(self.upstream(account)?.search(query, scope)?)
     }
 
     // Remotes
@@ -736,4 +832,37 @@ impl<B: GitBackend> Pool<B> {
 /// Resolve symlinks where possible, so paths compare the way git stores them.
 fn canonical(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Resolves `ACCOUNT:PATH` sources through the account's API.
+struct AccountResolver<'p, B: GitBackend> {
+    pool: &'p Pool<B>,
+}
+
+impl<B: GitBackend> SourceResolver for AccountResolver<'_, B> {
+    fn resolve(&self, source: &str) -> Result<Option<ResolvedSource>> {
+        let Some((account, path)) = split_account_source(source, &self.pool.config.accounts) else {
+            return Ok(None);
+        };
+        let upstream = self.pool.upstream(account)?;
+        // A bare repository name belongs to the account's own user.
+        let path = if path.contains('/') {
+            path.to_string()
+        } else {
+            let owner = match &account.user {
+                Some(user) => user.clone(),
+                None => upstream.current_user()?,
+            };
+            format!("{owner}/{path}")
+        };
+        let repo = upstream.repository(&path)?;
+        let url = match account.protocol {
+            config::CloneProtocol::Ssh => repo.ssh_url.clone(),
+            config::CloneProtocol::Https => repo.https_url.clone(),
+        };
+        Ok(Some(ResolvedSource {
+            url,
+            suggested_name: repo.name().to_string(),
+        }))
+    }
 }

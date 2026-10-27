@@ -60,6 +60,12 @@ pub enum Error {
     },
     #[error(transparent)]
     Git(#[from] GitError),
+    #[error(transparent)]
+    Upstream(#[from] crate::upstream::UpstreamError),
+    #[error("no account '{0}'; see `wtm auth list`")]
+    AccountNotFound(String),
+    #[error("account '{0}' already exists")]
+    AccountExists(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

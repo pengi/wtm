@@ -10,6 +10,7 @@ pub mod model;
 pub mod name;
 pub mod pool;
 pub mod source;
+pub mod upstream;
 
 pub use config::Config;
 pub use error::{Error, Result};

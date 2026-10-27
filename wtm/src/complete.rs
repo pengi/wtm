@@ -52,3 +52,26 @@ pub fn remotes() -> Vec<CompletionCandidate> {
     names.dedup();
     names.into_iter().map(CompletionCandidate::new).collect()
 }
+
+pub fn accounts() -> Vec<CompletionCandidate> {
+    let Some(pool) = pool() else {
+        return Vec::new();
+    };
+    pool.config()
+        .accounts
+        .iter()
+        .map(|a| CompletionCandidate::new(&a.name).help(Some(a.url.clone().into())))
+        .collect()
+}
+
+/// `ACCOUNT:` prefixes for `register`.
+pub fn account_sources() -> Vec<CompletionCandidate> {
+    let Some(pool) = pool() else {
+        return Vec::new();
+    };
+    pool.config()
+        .accounts
+        .iter()
+        .map(|a| CompletionCandidate::new(format!("{}:", a.name)))
+        .collect()
+}

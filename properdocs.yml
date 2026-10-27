@@ -16,6 +16,7 @@ nav:
   - Installation: install.md
   - Getting started: getting-started.md
   - Configuration: configuration.md
+  - Accounts: accounts.md
   - Repositories: repositories.md
   - Worktrees: worktrees.md
   - Command reference: reference/commands.md

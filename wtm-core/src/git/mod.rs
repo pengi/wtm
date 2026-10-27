@@ -174,6 +174,25 @@ impl Checkout {
     }
 }
 
+/// A credential as stored by git's credential helpers.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Credential {
+    /// The service it is for, e.g. `https://github.com`.
+    pub url: String,
+    pub username: Option<String>,
+    pub password: String,
+}
+
+impl fmt::Debug for Credential {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Credential")
+            .field("url", &self.url)
+            .field("username", &self.username)
+            .field("password", &"<hidden>")
+            .finish()
+    }
+}
+
 /// A normal clone: a working directory with a `.git` directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CloneInfo {
@@ -264,6 +283,16 @@ pub trait GitBackend {
     /// index, and with it staged changes, is kept. On failure, the clone is
     /// restored.
     fn convert_to_worktree(&self, path: &Path, git_dir: &Path, head: &Head) -> Result<()>;
+
+    // Credentials, kept by the user's git credential helpers
+
+    /// The stored credential for `url` (and `username`, if given). Never
+    /// prompts; None if no helper has one.
+    fn credential_fill(&self, url: &str, username: Option<&str>) -> Result<Option<Credential>>;
+    /// Store a credential with the credential helpers.
+    fn credential_approve(&self, credential: &Credential) -> Result<()>;
+    /// Remove a credential from the credential helpers.
+    fn credential_reject(&self, credential: &Credential) -> Result<()>;
 }
 
 /// The standard backend: git CLI for changes and network, libgit2 for reads.
@@ -399,6 +428,18 @@ impl GitBackend for DefaultBackend {
 
     fn convert_to_worktree(&self, path: &Path, git_dir: &Path, head: &Head) -> Result<()> {
         adopt::convert_to_worktree(&self.cli, path, git_dir, head)
+    }
+
+    fn credential_fill(&self, url: &str, username: Option<&str>) -> Result<Option<Credential>> {
+        self.cli.credential_fill(url, username)
+    }
+
+    fn credential_approve(&self, credential: &Credential) -> Result<()> {
+        self.cli.credential_store("approve", credential)
+    }
+
+    fn credential_reject(&self, credential: &Credential) -> Result<()> {
+        self.cli.credential_store("reject", credential)
     }
 }
 

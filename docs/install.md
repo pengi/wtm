@@ -1,6 +1,7 @@
 # Installation
 
-wtm needs git 2.30 or newer at run time.
+wtm needs git 2.30 or newer at run time, and `curl` for
+[accounts](accounts.md).
 
 ## Packages
 

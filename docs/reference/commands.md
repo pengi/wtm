@@ -22,13 +22,15 @@ Register an upstream repository
 
 Creates a bare repository named NAME in the repos directory, with SOURCE as its remote, and fetches it. No worktree is created.
 
+SOURCE is a URL, or ACCOUNT:PATH for a repository on an account's service, e.g. `github:owner/repo`. A PATH without owner is the account user's own repository.
+
 ```
 wtm register [OPTIONS] <SOURCE> [NAME]
 ```
 
 Arguments:
 
-- `<SOURCE>` — URL of the upstream repository, as given to `git clone`
+- `<SOURCE>` — URL of the upstream repository, as given to `git clone`, or ACCOUNT:PATH
 - `[<NAME>]` — Name of the repository [default: derived from SOURCE]
 
 Options:
@@ -55,6 +57,137 @@ Arguments:
 Options:
 
 - `--keep-path` — Leave the worktree where the clone is
+
+## wtm auth
+
+Manage accounts on upstream services (GitHub, GitLab)
+
+Accounts are kept in the config file. Their tokens are kept by git's credential helpers, the same way git keeps HTTPS passwords.
+
+### wtm auth add
+
+Add an account
+
+Asks for an access token, unless git's credential helper already has one for URL (for example from `gh auth login`). The token is checked against the service and stored with git's credential helper. Without a token, only public repositories can be looked up.
+
+GitHub tokens need the `repo` scope (or read access to the repositories, for fine-grained tokens); GitLab tokens `read_api`.
+
+```
+wtm auth add [OPTIONS] <NAME> <KIND>
+```
+
+Arguments:
+
+- `<NAME>` — Name of the account, used as ACCOUNT in `ACCOUNT:PATH`
+- `<KIND>` — Kind of service One of: `github`, `gitlab`.
+
+Options:
+
+- `--url <URL>` — Web address of the service [default: https://github.com or https://gitlab.com]
+- `--user <USER>` — Your user name [default: the token's user]
+- `--protocol <PROTOCOL>` — Clone URL to register repositories with (default: `ssh`)
+- `--token-stdin` — Read the token from standard input instead of asking
+
+### wtm auth list
+
+List accounts
+
+```
+wtm auth list [OPTIONS]
+```
+
+### wtm auth check
+
+Check that accounts' tokens work
+
+```
+wtm auth check [OPTIONS] [NAME]
+```
+
+Arguments:
+
+- `[<NAME>]` — Account [default: all]
+
+### wtm auth remove
+
+Remove an account from the config file
+
+The token stays with git's credential helper, since git may use it for HTTPS, unless --forget-token is given.
+
+```
+wtm auth remove [OPTIONS] <NAME>
+```
+
+Arguments:
+
+- `<NAME>` — Account
+
+Options:
+
+- `--forget-token` — Also remove the token from git's credential helper
+
+### wtm auth help
+
+Print this message or the help of the given subcommand(s)
+
+#### wtm auth help add
+
+Add an account
+
+```
+wtm auth help add
+```
+
+#### wtm auth help list
+
+List accounts
+
+```
+wtm auth help list
+```
+
+#### wtm auth help check
+
+Check that accounts' tokens work
+
+```
+wtm auth help check
+```
+
+#### wtm auth help remove
+
+Remove an account from the config file
+
+```
+wtm auth help remove
+```
+
+#### wtm auth help help
+
+Print this message or the help of the given subcommand(s)
+
+```
+wtm auth help help
+```
+
+## wtm search
+
+Search repositories on an account's service
+
+Lists repositories you own or are a member of, matching QUERY if given. With --all, searches all repositories visible to you (QUERY is then required). Register one with `wtm register ACCOUNT:PATH`.
+
+```
+wtm search [OPTIONS] <ACCOUNT> [QUERY]
+```
+
+Arguments:
+
+- `<ACCOUNT>` — Account to search with
+- `[<QUERY>]` — Text to look for in names and descriptions
+
+Options:
+
+- `--all` — Search all visible repositories, not just your own
 
 ## wtm unregister
 
@@ -339,6 +472,50 @@ Turn an existing clone into a registered repository and worktree
 
 ```
 wtm help adopt
+```
+
+### wtm help auth
+
+Manage accounts on upstream services (GitHub, GitLab)
+
+#### wtm help auth add
+
+Add an account
+
+```
+wtm help auth add
+```
+
+#### wtm help auth list
+
+List accounts
+
+```
+wtm help auth list
+```
+
+#### wtm help auth check
+
+Check that accounts' tokens work
+
+```
+wtm help auth check
+```
+
+#### wtm help auth remove
+
+Remove an account from the config file
+
+```
+wtm help auth remove
+```
+
+### wtm help search
+
+Search repositories on an account's service
+
+```
+wtm help search
 ```
 
 ### wtm help unregister

@@ -4,7 +4,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use super::{Checkout, GitError, Head, Result};
+use super::{Checkout, Credential, GitError, Head, Result};
 
 /// The oldest git with everything wtm uses (`git worktree repair`).
 const MINIMUM_VERSION: (u32, u32) = (2, 30);
@@ -193,6 +193,54 @@ impl GitCli {
         Ok(())
     }
 
+    pub fn credential_fill(&self, url: &str, username: Option<&str>) -> Result<Option<Credential>> {
+        let mut input = credential_line("url", url)?;
+        if let Some(username) = username {
+            input.push_str(&credential_line("username", username)?);
+        }
+        // Never prompt: no terminal, no askpass program, no Git Credential
+        // Manager dialog.
+        let mut cmd = self.command(None, ["-c", "core.askPass=", "credential", "fill"]);
+        cmd.env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_ASKPASS", "")
+            .env("SSH_ASKPASS", "")
+            .env("GCM_INTERACTIVE", "never");
+        let Some(output) = run_with_input(cmd, &input)? else {
+            return Ok(None);
+        };
+        let mut found_username = None;
+        let mut password = None;
+        for line in output.lines() {
+            if let Some(v) = line.strip_prefix("username=") {
+                found_username = Some(v.to_string());
+            } else if let Some(v) = line.strip_prefix("password=") {
+                password = Some(v.to_string());
+            }
+        }
+        Ok(password.map(|password| Credential {
+            url: url.to_string(),
+            username: found_username,
+            password,
+        }))
+    }
+
+    /// `git credential approve` or `reject`.
+    pub fn credential_store(&self, action: &str, credential: &Credential) -> Result<()> {
+        let mut input = credential_line("url", &credential.url)?;
+        if let Some(username) = &credential.username {
+            input.push_str(&credential_line("username", username)?);
+        }
+        input.push_str(&credential_line("password", &credential.password)?);
+        let cmd = self.command(None, ["credential", action]);
+        match run_with_input(cmd, &input)? {
+            Some(_) => Ok(()),
+            None => Err(GitError::Command {
+                command: format!("credential {action}"),
+                stderr: String::new(),
+            }),
+        }
+    }
+
     fn command<I, S>(&self, git_dir: Option<&Path>, args: I) -> Command
     where
         I: IntoIterator<Item = S>,
@@ -265,4 +313,34 @@ where
         command,
         stderr: String::from_utf8_lossy(stderr).into_owned(),
     }
+}
+
+/// One `key=value` line of git's credential protocol.
+fn credential_line(key: &str, value: &str) -> Result<String> {
+    if value.contains(['\n', '\0']) {
+        return Err(GitError::Library(format!(
+            "credential {key} contains a line break"
+        )));
+    }
+    Ok(format!("{key}={value}\n"))
+}
+
+/// Run with `input` on standard input; standard output on success, None on
+/// failure.
+fn run_with_input(mut cmd: Command, input: &str) -> Result<Option<String>> {
+    use std::io::Write;
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(GitError::Spawn)?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(input.as_bytes()).map_err(GitError::Spawn)?;
+    }
+    let out = child.wait_with_output().map_err(GitError::Spawn)?;
+    Ok(out
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned()))
 }

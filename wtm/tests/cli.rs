@@ -792,3 +792,151 @@ fn adopt_refuses_what_it_cannot_convert() {
     assert!(clone.join(".git").is_dir());
     assert_eq!(env.git(&clone, &["status", "--porcelain"]), "");
 }
+
+impl Env {
+    /// A fake GitHub API under `file://`, which curl serves without
+    /// network. The account `fx` uses it; tokens go to a `store` helper.
+    fn github_fixture(&self) -> (String, PathBuf) {
+        let upstream = self.upstream("proj");
+        let api = self.root().join("fx/api/v3");
+        let repo = format!(
+            r#"{{"full_name":"someone/proj","description":"A project","ssh_url":"{0}",
+                "clone_url":"{0}","default_branch":"trunk"}}"#,
+            upstream.display()
+        );
+        std::fs::create_dir_all(api.join("repos/someone")).unwrap();
+        std::fs::create_dir_all(api.join("search")).unwrap();
+        std::fs::write(api.join("repos/someone/proj"), &repo).unwrap();
+        std::fs::write(api.join("user"), r#"{"login":"someone"}"#).unwrap();
+        std::fs::write(
+            api.join("search/repositories"),
+            format!(r#"{{"items":[{repo}]}}"#),
+        )
+        .unwrap();
+
+        let creds = self.root().join("credentials");
+        let helper = format!("store --file={}", creds.display());
+        self.git(
+            self.root(),
+            &["config", "--global", "credential.helper", &helper],
+        );
+        (
+            format!("file://{}", self.root().join("fx").display()),
+            creds,
+        )
+    }
+}
+
+#[test]
+fn accounts_register_and_search() {
+    let env = Env::new();
+    let (url, creds) = env.github_fixture();
+
+    env.wtm()
+        .args([
+            "auth",
+            "add",
+            "fx",
+            "github",
+            "--url",
+            &url,
+            "--token-stdin",
+        ])
+        .write_stdin("secret-token\n")
+        .assert()
+        .success()
+        .stderr(contains("authenticated as someone"));
+    assert!(
+        std::fs::read_to_string(&creds)
+            .unwrap()
+            .contains("secret-token")
+    );
+    let config = std::fs::read_to_string(env.home().join(".config/wtm/config.toml")).unwrap();
+    assert!(
+        config.contains("[accounts.fx]") && config.contains("user = \"someone\""),
+        "{config}"
+    );
+
+    env.wtm()
+        .args(["auth", "list"])
+        .assert()
+        .success()
+        .stdout(contains("fx").and(contains("someone")).and(contains("yes")));
+    env.wtm()
+        .args(["auth", "check"])
+        .assert()
+        .success()
+        .stderr(contains("fx: authenticated as someone"));
+    env.wtm()
+        .args([
+            "auth",
+            "add",
+            "fx",
+            "github",
+            "--url",
+            &url,
+            "--token-stdin",
+        ])
+        .write_stdin("x\n")
+        .assert()
+        .failure()
+        .stderr(contains("already exists"));
+
+    // A path without owner is the account user's repository.
+    env.wtm()
+        .args(["register", "fx:proj"])
+        .assert()
+        .success()
+        .stderr(contains("Registered 'proj'"));
+    let path = env.new_worktree(&["proj"]);
+    assert!(path.join(".gitignore").exists());
+    env.wtm()
+        .args(["register", "fx:someone/nope"])
+        .assert()
+        .failure()
+        .stderr(contains("not found on the server: someone/nope"));
+
+    env.wtm()
+        .args(["search", "fx", "--all", "proj"])
+        .assert()
+        .success()
+        .stdout(contains("someone/proj").and(contains("A project")));
+
+    env.wtm()
+        .args(["auth", "remove", "fx", "--forget-token"])
+        .assert()
+        .success();
+    assert!(
+        !std::fs::read_to_string(&creds)
+            .unwrap()
+            .contains("secret-token")
+    );
+    env.wtm()
+        .args(["auth", "list"])
+        .assert()
+        .success()
+        .stdout(contains("fx").not());
+}
+
+#[test]
+fn accounts_without_token() {
+    let env = Env::new();
+    let (url, _) = env.github_fixture();
+    env.wtm()
+        .args([
+            "auth", "add", "fx", "github", "--url", &url, "--user", "someone",
+        ])
+        .arg("--token-stdin")
+        .write_stdin("\n")
+        .assert()
+        .success()
+        .stderr(contains("without token"));
+    env.wtm()
+        .args(["search", "fx"])
+        .assert()
+        .failure()
+        .stderr(contains("token is needed"));
+    // Public lookups work without a token.
+    env.wtm().args(["register", "fx:proj"]).assert().success();
+    env.wtm().args(["auth", "check", "fx"]).assert().failure();
+}

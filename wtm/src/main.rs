@@ -2,6 +2,7 @@ mod args;
 mod commands;
 mod complete;
 mod generate;
+mod prompt;
 mod shell;
 mod table;
 

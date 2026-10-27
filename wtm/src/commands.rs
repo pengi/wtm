@@ -6,8 +6,10 @@ use wtm_core::git::{Checkout, DefaultBackend, GitOutput, Head};
 use wtm_core::model::{DropOptions, NewWorktree, Worktree, WorktreeState};
 use wtm_core::{Config, Pool};
 
-use crate::args::{Cli, Command, RemoteCommand};
-use crate::{generate, shell, table};
+use crate::args::{self, AuthCommand, Cli, Command, RemoteCommand};
+use crate::{generate, prompt, shell, table};
+use wtm_core::config::{Account, AccountKind, CloneProtocol};
+use wtm_core::upstream::SearchScope;
 
 pub fn run(cli: Cli) -> Result<()> {
     let overrides = Overrides {
@@ -61,6 +63,12 @@ pub fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Command::Repos => repos(&pool()?),
+        Command::Auth(command) => auth(&pool()?, command),
+        Command::Search {
+            account,
+            query,
+            all,
+        } => search(&pool()?, &account, query.as_deref(), all),
         Command::Remote(command) => remote(&pool()?, command),
         Command::Fetch { repos } => fetch(&pool()?, &repos),
         Command::New {
@@ -416,6 +424,125 @@ fn show_config(config: &Config) -> Result<()> {
             config.checkouts_dir.source.to_string(),
         ],
     ];
+    print!("{}", table::format(&rows));
+    Ok(())
+}
+
+fn auth(pool: &Pool, command: AuthCommand) -> Result<()> {
+    match command {
+        AuthCommand::Add {
+            name,
+            kind,
+            url,
+            user,
+            protocol,
+            token_stdin,
+        } => {
+            let kind = match kind {
+                args::AccountKind::Github => AccountKind::GitHub,
+                args::AccountKind::Gitlab => AccountKind::GitLab,
+            };
+            let protocol = match protocol {
+                args::Protocol::Ssh => CloneProtocol::Ssh,
+                args::Protocol::Https => CloneProtocol::Https,
+            };
+            let account = Account::new(&name, kind, url.as_deref(), user.as_deref(), protocol)?;
+            let token = if token_stdin {
+                let mut token = String::new();
+                std::io::stdin().read_line(&mut token)?;
+                Some(token.trim().to_string())
+            } else if pool.token(&account)?.is_some() {
+                eprintln!(
+                    "Using the token git's credential helper has for {}",
+                    account.url
+                );
+                None
+            } else {
+                Some(prompt::read_secret(&format!(
+                    "Access token for {} (empty for none): ",
+                    account.url
+                ))?)
+            };
+            let token = token.filter(|t| !t.is_empty());
+            let added = pool.add_account(account, token)?;
+            match &added.login {
+                Some(login) => eprintln!(
+                    "Added account '{}', authenticated as {login}",
+                    added.account.name
+                ),
+                None => eprintln!(
+                    "Added account '{}' without token; only public repositories are visible",
+                    added.account.name
+                ),
+            }
+        }
+        AuthCommand::List => {
+            let mut rows = vec![
+                ["NAME", "KIND", "URL", "USER", "TOKEN"]
+                    .map(String::from)
+                    .to_vec(),
+            ];
+            for account in &pool.config().accounts {
+                let token = match pool.token(account) {
+                    Ok(Some(_)) => "yes".to_string(),
+                    Ok(None) => "no".to_string(),
+                    Err(e) => format!("error: {e}"),
+                };
+                rows.push(vec![
+                    account.name.clone(),
+                    account.kind.to_string(),
+                    account.url.clone(),
+                    account.user.clone().unwrap_or("-".into()),
+                    token,
+                ]);
+            }
+            print!("{}", table::format(&rows));
+        }
+        AuthCommand::Check { name } => {
+            let accounts: Vec<&Account> = match &name {
+                Some(name) => vec![pool.account(name)?],
+                None => pool.config().accounts.iter().collect(),
+            };
+            let mut failed = Vec::new();
+            for account in accounts {
+                match pool.upstream(account).and_then(|u| Ok(u.current_user()?)) {
+                    Ok(login) => eprintln!("{}: authenticated as {login}", account.name),
+                    Err(e) => {
+                        eprintln!("{}: {e}", account.name);
+                        failed.push(account.name.clone());
+                    }
+                }
+            }
+            if !failed.is_empty() {
+                anyhow::bail!("check failed for: {}", failed.join(", "));
+            }
+        }
+        AuthCommand::Remove { name, forget_token } => {
+            pool.remove_account(&name, forget_token)?;
+            eprintln!("Removed account '{name}'");
+        }
+    }
+    Ok(())
+}
+
+fn search(pool: &Pool, account: &str, query: Option<&str>, all: bool) -> Result<()> {
+    let account = pool.account(account)?;
+    let scope = if all {
+        SearchScope::All
+    } else {
+        SearchScope::Mine
+    };
+    let repos = pool.search(account, query, scope)?;
+    let mut rows = vec![vec!["PATH".to_string(), "DESCRIPTION".to_string()]];
+    for repo in repos {
+        let mut description = repo.description.clone().unwrap_or_default();
+        for (flag, label) in [(repo.archived, "archived"), (repo.fork, "fork")] {
+            if flag {
+                description = format!("[{label}] {description}");
+            }
+        }
+        rows.push(vec![repo.path, description.trim_end().to_string()]);
+    }
     print!("{}", table::format(&rows));
     Ok(())
 }
