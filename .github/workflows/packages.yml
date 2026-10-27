@@ -1,0 +1,43 @@
+name: Packages
+
+# Builds the .deb and .rpm packages and tests them in clean containers.
+# Called from CI and from the release workflow.
+
+on:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo install --locked cargo-deb@3.7.0 cargo-generate-rpm@0.21.1
+      - run: packaging/build-packages.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: target/packages/
+          if-no-files-found: error
+
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:12", "ubuntu:22.04", "ubuntu:24.04", "almalinux:9"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: target/packages
+      - run: packaging/test-packages.sh "${{ matrix.image }}"

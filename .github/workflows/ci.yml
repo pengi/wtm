@@ -58,3 +58,6 @@ jobs:
           cargo run -q -p wtm -- generate markdown > docs/reference/commands.md
           git diff --exit-code docs/reference/commands.md
       - run: properdocs build --strict
+
+  packages:
+    uses: ./.github/workflows/packages.yml
