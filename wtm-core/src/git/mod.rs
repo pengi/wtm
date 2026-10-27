@@ -9,6 +9,7 @@
 //! operations, so the user's ssh config, credential helpers, hooks and
 //! filters (git-lfs) apply. It uses libgit2 for read-only queries.
 
+mod adopt;
 mod cli;
 mod libgit;
 
@@ -173,6 +174,18 @@ impl Checkout {
     }
 }
 
+/// A normal clone: a working directory with a `.git` directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloneInfo {
+    pub head: Head,
+    pub operation: Option<Operation>,
+    /// Number of linked worktrees the clone already has.
+    pub linked_worktrees: usize,
+    pub submodules: usize,
+    /// `core.worktree` is set, so the working directory is elsewhere.
+    pub custom_worktree: bool,
+}
+
 /// All git access used by wtm.
 ///
 /// `git_dir` is always the path of a bare repository in the pool.
@@ -240,6 +253,17 @@ pub trait GitBackend {
     /// file. Returns the path as written, even if it no longer exists.
     fn worktree_link(&self, path: &Path) -> Option<PathBuf>;
     fn worktree_status(&self, path: &Path) -> Result<StatusSummary>;
+
+    // Adopting existing clones
+
+    /// Inspect `path` as the top directory of a normal clone. None if it is
+    /// not one (no repository, a bare repository, or a linked worktree).
+    fn inspect_clone(&self, path: &Path) -> Result<Option<CloneInfo>>;
+    /// Turn the normal clone at `path` into the bare repository `git_dir`,
+    /// with `path` as a linked worktree of it checked out at `head`. The
+    /// index, and with it staged changes, is kept. On failure, the clone is
+    /// restored.
+    fn convert_to_worktree(&self, path: &Path, git_dir: &Path, head: &Head) -> Result<()>;
 }
 
 /// The standard backend: git CLI for changes and network, libgit2 for reads.
@@ -362,17 +386,30 @@ impl GitBackend for DefaultBackend {
     }
 
     fn worktree_link(&self, path: &Path) -> Option<PathBuf> {
-        let content = std::fs::read_to_string(path.join(".git")).ok()?;
-        let target = content.strip_prefix("gitdir:")?.trim();
-        let target = PathBuf::from(target);
-        Some(if target.is_relative() {
-            path.join(target)
-        } else {
-            target
-        })
+        worktree_link(path)
     }
 
     fn worktree_status(&self, path: &Path) -> Result<StatusSummary> {
         libgit::worktree_status(path)
     }
+
+    fn inspect_clone(&self, path: &Path) -> Result<Option<CloneInfo>> {
+        libgit::inspect_clone(path)
+    }
+
+    fn convert_to_worktree(&self, path: &Path, git_dir: &Path, head: &Head) -> Result<()> {
+        adopt::convert_to_worktree(&self.cli, path, git_dir, head)
+    }
+}
+
+/// Read the `gitdir:` line of a worktree's `.git` file.
+fn worktree_link(path: &Path) -> Option<PathBuf> {
+    let content = std::fs::read_to_string(path.join(".git")).ok()?;
+    let target = content.strip_prefix("gitdir:")?.trim();
+    let target = PathBuf::from(target);
+    Some(if target.is_relative() {
+        path.join(target)
+    } else {
+        target
+    })
 }

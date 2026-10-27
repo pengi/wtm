@@ -4,7 +4,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use super::{Checkout, GitError, Result};
+use super::{Checkout, GitError, Head, Result};
 
 /// The oldest git with everything wtm uses (`git worktree repair`).
 const MINIMUM_VERSION: (u32, u32) = (2, 30);
@@ -152,6 +152,31 @@ impl GitCli {
             args.extend([OsStr::new("--force"), OsStr::new("--force")]);
         }
         args.push(path.as_os_str());
+        self.run_captured(Some(git_dir), args)?;
+        Ok(())
+    }
+
+    /// Register a worktree at `path` without checking out any files.
+    pub fn add_worktree_no_checkout(&self, git_dir: &Path, path: &Path, head: &Head) -> Result<()> {
+        let mut args: Vec<&OsStr> = vec![
+            "worktree".as_ref(),
+            "add".as_ref(),
+            "--no-checkout".as_ref(),
+        ];
+        let target = match head {
+            Head::Branch(branch) => branch.as_str(),
+            Head::Detached(oid) => {
+                args.push("--detach".as_ref());
+                oid.0.as_str()
+            }
+            Head::Unborn(branch) => {
+                return Err(GitError::Library(format!(
+                    "branch '{branch}' has no commits"
+                )));
+            }
+        };
+        args.push(path.as_os_str());
+        args.push(target.as_ref());
         self.run_captured(Some(git_dir), args)?;
         Ok(())
     }

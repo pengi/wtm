@@ -56,6 +56,27 @@ pub enum Command {
         remote: String,
     },
 
+    /// Turn an existing clone into a registered repository and worktree
+    ///
+    /// Moves the clone's .git directory into the repos directory as the
+    /// bare repository NAME, and makes the clone's directory a worktree of
+    /// it. The directory is moved into the checkouts directory, unless
+    /// --keep-path is given. Branches, stashes, remotes, hooks, uncommitted
+    /// changes and untracked files are kept.
+    ///
+    /// Refused for clones with linked worktrees or submodules, or with an
+    /// operation such as a rebase in progress.
+    Adopt {
+        /// Top directory of the clone
+        #[arg(value_hint = clap::ValueHint::DirPath)]
+        path: PathBuf,
+        /// Name of the repository and worktree [default: the directory name]
+        name: Option<String>,
+        /// Leave the worktree where the clone is
+        #[arg(long)]
+        keep_path: bool,
+    },
+
     /// Remove a registered repository
     ///
     /// Deletes the bare repository. Refused while the repository has

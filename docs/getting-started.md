@@ -14,6 +14,17 @@ This creates the bare repository `project.git` in the repos directory and
 fetches everything from the upstream. No files are checked out yet. The
 name is optional; without it, the name is taken from the URL.
 
+### Or adopt a clone you already have
+
+```sh
+wtm adopt ~/src/project
+```
+
+This turns an existing clone into the registered repository `project`, and
+moves its directory to `~/wt/project` as a worktree. Everything in it is
+kept: branches, stashes, remotes, hooks, uncommitted changes and untracked
+files. Use `--keep-path` to leave the directory where it is.
+
 ## Create a worktree
 
 ```sh

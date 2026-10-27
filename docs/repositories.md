@@ -24,6 +24,9 @@ be set up, not the way `git clone --bare` does it:
 - **HEAD** points at the upstream's default branch. wtm uses it as the
   default branch when a remote doesn't say.
 
+A repository made with `wtm adopt` keeps the clone's own setup: its
+remotes, branches, stashes, hooks and config.
+
 Everything else is plain git. You can use git commands on the repository
 directly, for example `git -C "$(wtm locate --repo project)" log --all`.
 

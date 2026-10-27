@@ -643,3 +643,152 @@ fn shell_init_defines_cd_function() {
         .assert()
         .failure();
 }
+
+impl Env {
+    /// A normal clone of a fresh upstream, at `<root>/src/<name>`.
+    fn clone_of_upstream(&self, name: &str) -> PathBuf {
+        let upstream = self.upstream(&format!("{name}-up"));
+        let clone = self.root().join("src").join(name);
+        std::fs::create_dir_all(clone.parent().unwrap()).unwrap();
+        self.git(
+            self.root(),
+            &[
+                "clone",
+                "-q",
+                upstream.to_str().unwrap(),
+                clone.to_str().unwrap(),
+            ],
+        );
+        clone
+    }
+}
+
+#[test]
+fn adopt_keeps_everything() {
+    let env = Env::new();
+    let clone = env.clone_of_upstream("proj");
+
+    // Local state that must survive: an unpushed branch, a stash, staged
+    // and unstaged changes, untracked and ignored files.
+    env.git(&clone, &["checkout", "-q", "-b", "local"]);
+    env.commit(&clone, "local.txt", "local");
+    std::fs::write(clone.join("stashed.txt"), "s").unwrap();
+    env.git(&clone, &["stash", "push", "-q", "-u"]);
+    std::fs::write(clone.join("staged.txt"), "s").unwrap();
+    env.git(&clone, &["add", "staged.txt"]);
+    std::fs::write(clone.join("local.txt"), "changed").unwrap();
+    std::fs::write(clone.join("untracked.txt"), "u").unwrap();
+    std::fs::write(clone.join("build.o"), "o").unwrap();
+    let status = env.git(&clone, &["status", "--porcelain", "--ignored"]);
+
+    let out = env
+        .wtm()
+        .args(["adopt", clone.to_str().unwrap()])
+        .assert()
+        .success();
+    let path = PathBuf::from(
+        String::from_utf8(out.get_output().stdout.clone())
+            .unwrap()
+            .trim(),
+    );
+    assert_eq!(path, env.checkouts().join("proj"));
+    assert!(!clone.exists());
+
+    assert!(path.join(".git").is_file());
+    assert_eq!(
+        env.git(&path, &["status", "--porcelain", "--ignored"]),
+        status
+    );
+    assert_eq!(env.branch(&path), "local");
+    assert!(env.git(&path, &["stash", "list"]).contains("stash@{0}"));
+
+    let git_dir = env.repos().join("proj.git");
+    assert_eq!(
+        env.git(&git_dir, &["rev-parse", "--is-bare-repository"])
+            .trim(),
+        "true"
+    );
+    assert_eq!(
+        env.git(&git_dir, &["symbolic-ref", "HEAD"]).trim(),
+        "refs/heads/trunk"
+    );
+
+    env.wtm().arg("list").assert().success().stdout(
+        contains("proj")
+            .and(contains("local"))
+            .and(contains("1 staged")),
+    );
+    // The adopted repository works like a registered one.
+    let other = env.new_worktree(&["proj", "feature"]);
+    assert!(other.join("feature.txt").exists());
+    env.wtm()
+        .args(["drop", "proj"])
+        .assert()
+        .failure()
+        .stderr(contains("uncommitted changes"));
+}
+
+#[test]
+fn adopt_keep_path_and_detached_head() {
+    let env = Env::new();
+    let clone = env.clone_of_upstream("proj");
+    env.git(&clone, &["checkout", "-q", "--detach", "HEAD"]);
+
+    env.wtm()
+        .args(["adopt", "--keep-path", clone.to_str().unwrap(), "renamed"])
+        .assert()
+        .success();
+    assert!(clone.join(".git").is_file());
+    assert!(env.repos().join("renamed.git").is_dir());
+    assert_eq!(env.git(&clone, &["status", "--porcelain"]), "");
+    assert_eq!(env.branch(&clone), "");
+
+    let out = env.wtm().args(["locate", "proj"]).assert().success();
+    let located = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert_eq!(
+        Path::new(located.trim()).canonicalize().unwrap(),
+        clone.canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn adopt_refuses_what_it_cannot_convert() {
+    let env = Env::new();
+    let clone = env.clone_of_upstream("proj");
+
+    env.wtm()
+        .args(["adopt", clone.join("subdir").to_str().unwrap()])
+        .assert()
+        .failure();
+    std::fs::create_dir(clone.join("sub")).unwrap();
+    env.wtm()
+        .args(["adopt", clone.join("sub").to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(contains("not the top directory"));
+
+    let linked = env.root().join("linked");
+    env.git(&clone, &["worktree", "add", "-q", linked.to_str().unwrap()]);
+    env.wtm()
+        .args(["adopt", clone.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(contains("linked worktrees"));
+    env.wtm()
+        .args(["adopt", linked.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(contains("not the top directory"));
+    env.git(&clone, &["worktree", "remove", linked.to_str().unwrap()]);
+
+    env.registered();
+    env.wtm()
+        .args(["adopt", clone.to_str().unwrap(), "myrepo"])
+        .assert()
+        .failure()
+        .stderr(contains("already registered"));
+
+    // Nothing was changed by the refusals.
+    assert!(clone.join(".git").is_dir());
+    assert_eq!(env.git(&clone, &["status", "--porcelain"]), "");
+}

@@ -26,6 +26,15 @@ pub struct Registered {
     pub default_branch: Option<String>,
 }
 
+/// A clone turned into a registered repository and worktree.
+#[derive(Debug)]
+pub struct Adopted {
+    pub repo: Repo,
+    /// Where the worktree is now.
+    pub path: PathBuf,
+    pub head: Head,
+}
+
 /// Worktrees re-linked by [`Pool::repair`].
 #[derive(Debug)]
 pub struct Repaired {
@@ -247,6 +256,96 @@ impl<B: GitBackend> Pool<B> {
         }
         std::fs::remove_dir_all(&repo.git_dir).map_err(Error::io(&repo.git_dir))?;
         Ok(repo)
+    }
+
+    /// Turn an existing clone into a registered repository and a worktree
+    /// of it. The clone's directory is moved into the checkouts directory,
+    /// unless `keep_path`. Branches, stashes, remotes, uncommitted changes
+    /// and untracked files are kept.
+    pub fn adopt(&self, path: &Path, name: Option<&str>, keep_path: bool) -> Result<Adopted> {
+        let path = path.canonicalize().map_err(Error::io(path))?;
+        let info = self
+            .git
+            .inspect_clone(&path)?
+            .ok_or_else(|| Error::NotAClone(path.clone()))?;
+        let refuse = |reason: String| {
+            Err(Error::CannotAdopt {
+                path: path.clone(),
+                reason,
+            })
+        };
+        if info.linked_worktrees > 0 {
+            return refuse("it has linked worktrees; remove them first".into());
+        }
+        if info.submodules > 0 {
+            return refuse("it has submodules, which wtm doesn't support yet".into());
+        }
+        if info.custom_worktree {
+            return refuse("core.worktree is set".into());
+        }
+        if let Some(op) = info.operation {
+            return refuse(format!("a {op} is in progress"));
+        }
+        if let Head::Unborn(branch) = &info.head {
+            return refuse(format!("branch '{branch}' has no commits"));
+        }
+
+        let name = match name {
+            Some(name) => name.to_string(),
+            None => path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        };
+        name::validate(&name)?;
+        let git_dir = self.repo_path(&name);
+        if git_dir.exists() {
+            return Err(Error::RepoExists(name));
+        }
+        // A clone already in place in the checkouts directory stays there.
+        let keep_path = keep_path || canonical(&self.checkouts_dir().join(&name)) == path;
+        let target = if keep_path {
+            path.clone()
+        } else {
+            self.checkouts_dir().join(&name)
+        };
+        if !keep_path && target.symlink_metadata().is_ok() {
+            return Err(Error::PathExists(target));
+        }
+        if canonical(self.checkouts_dir()).starts_with(&path)
+            || canonical(self.repos_dir()).starts_with(&path)
+        {
+            return refuse("it contains the wtm directories".into());
+        }
+
+        std::fs::create_dir_all(self.repos_dir()).map_err(Error::io(self.repos_dir()))?;
+        if !keep_path {
+            std::fs::create_dir_all(self.checkouts_dir())
+                .map_err(Error::io(self.checkouts_dir()))?;
+            std::fs::rename(&path, &target).map_err(Error::io(&path))?;
+        }
+        if let Err(e) = self.git.convert_to_worktree(&target, &git_dir, &info.head) {
+            if !keep_path {
+                let _ = std::fs::rename(&target, &path);
+            }
+            return Err(e.into());
+        }
+
+        // Record the default branch, so `new` works as for registered
+        // repositories. Not every remote is reachable now; that's fine.
+        let repo = Repo { name, git_dir };
+        if let Some(remote) = self.default_remote(&repo)? {
+            let _ = self.git.update_remote_head(&repo.git_dir, &remote);
+            if let Some(branch) = self.git.remote_head(&repo.git_dir, &remote)? {
+                self.git.set_head_branch(&repo.git_dir, &branch)?;
+            }
+        }
+
+        Ok(Adopted {
+            repo,
+            path: target,
+            head: info.head,
+        })
     }
 
     // Remotes

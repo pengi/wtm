@@ -36,6 +36,10 @@ pub enum Error {
     WorktreeNotFound(String),
     #[error("'{name}' matches several worktrees: {}", .paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "))]
     AmbiguousWorktree { name: String, paths: Vec<PathBuf> },
+    #[error("{} is not the top directory of a git clone", .0.display())]
+    NotAClone(PathBuf),
+    #[error("cannot adopt {}: {reason}", .path.display())]
+    CannotAdopt { path: PathBuf, reason: String },
     #[error("{0} already exists")]
     PathExists(PathBuf),
     #[error("branch '{branch}' is already checked out in {}", .path.display())]

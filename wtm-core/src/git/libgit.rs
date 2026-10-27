@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use git2::{BranchType, ErrorCode, Repository, RepositoryState, Status, StatusOptions};
 
 use super::{
-    BranchInfo, GitError, Head, Oid, Operation, RemoteInfo, Result, StatusSummary, UpstreamInfo,
-    WorktreeInfo,
+    BranchInfo, CloneInfo, GitError, Head, Oid, Operation, RemoteInfo, Result, StatusSummary,
+    UpstreamInfo, WorktreeInfo,
 };
 
 impl From<git2::Error> for GitError {
@@ -260,7 +260,12 @@ pub fn worktree_status(path: &Path) -> Result<StatusSummary> {
             summary.untracked += 1;
         }
     }
-    summary.operation = match repo.state() {
+    summary.operation = operation(&repo);
+    Ok(summary)
+}
+
+fn operation(repo: &Repository) -> Option<Operation> {
+    match repo.state() {
         RepositoryState::Clean => None,
         RepositoryState::Merge => Some(Operation::Merge),
         RepositoryState::Revert | RepositoryState::RevertSequence => Some(Operation::Revert),
@@ -274,6 +279,34 @@ pub fn worktree_status(path: &Path) -> Result<StatusSummary> {
         RepositoryState::ApplyMailbox | RepositoryState::ApplyMailboxOrRebase => {
             Some(Operation::ApplyMailbox)
         }
+    }
+}
+
+pub fn inspect_clone(path: &Path) -> Result<Option<CloneInfo>> {
+    let repo = match Repository::open(path) {
+        Ok(repo) => repo,
+        Err(e) if not_found(&e) => return Ok(None),
+        Err(e) => return Err(e.into()),
     };
-    Ok(summary)
+    if repo.is_bare() || repo.is_worktree() {
+        return Ok(None);
+    }
+    // Must be the top directory, with the repository in its .git directory.
+    let git_dir: PathBuf = repo.path().components().collect();
+    let expected = path.join(".git");
+    if git_dir.canonicalize().ok() != expected.canonicalize().ok() || !expected.is_dir() {
+        return Ok(None);
+    }
+    let custom_worktree = repo
+        .config()?
+        .open_level(git2::ConfigLevel::Local)?
+        .get_string("core.worktree")
+        .is_ok();
+    Ok(Some(CloneInfo {
+        head: head_of(&repo)?,
+        operation: operation(&repo),
+        linked_worktrees: repo.worktrees()?.len(),
+        submodules: repo.submodules()?.len(),
+        custom_worktree,
+    }))
 }

@@ -35,6 +35,27 @@ Options:
 
 - `--remote <REMOTE>` — Name of the remote (default: `origin`)
 
+## wtm adopt
+
+Turn an existing clone into a registered repository and worktree
+
+Moves the clone's .git directory into the repos directory as the bare repository NAME, and makes the clone's directory a worktree of it. The directory is moved into the checkouts directory, unless --keep-path is given. Branches, stashes, remotes, hooks, uncommitted changes and untracked files are kept.
+
+Refused for clones with linked worktrees or submodules, or with an operation such as a rebase in progress.
+
+```
+wtm adopt [OPTIONS] <PATH> [NAME]
+```
+
+Arguments:
+
+- `<PATH>` — Top directory of the clone
+- `[<NAME>]` — Name of the repository and worktree [default: the directory name]
+
+Options:
+
+- `--keep-path` — Leave the worktree where the clone is
+
 ## wtm unregister
 
 Remove a registered repository
@@ -310,6 +331,14 @@ Register an upstream repository
 
 ```
 wtm help register
+```
+
+### wtm help adopt
+
+Turn an existing clone into a registered repository and worktree
+
+```
+wtm help adopt
 ```
 
 ### wtm help unregister

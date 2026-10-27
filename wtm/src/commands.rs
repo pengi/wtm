@@ -29,6 +29,28 @@ pub fn run(cli: Cli) -> Result<()> {
             name,
             remote,
         } => register(&pool()?, &source, name.as_deref(), &remote),
+        Command::Adopt {
+            path,
+            name,
+            keep_path,
+        } => {
+            let original = path.canonicalize().unwrap_or_else(|_| path.clone());
+            let adopted = pool()?.adopt(&path, name.as_deref(), keep_path)?;
+            eprintln!(
+                "Adopted '{}' as {} with worktree {}",
+                adopted.repo.name,
+                adopted.repo.git_dir.display(),
+                adopted.path.display()
+            );
+            if let Ok(cwd) = std::env::current_dir()
+                && cwd.starts_with(&original)
+                && adopted.path != original
+            {
+                eprintln!("note: the current directory was moved; cd to the new path");
+            }
+            println!("{}", adopted.path.display());
+            Ok(())
+        }
         Command::Unregister { repo, force } => {
             let repo = pool()?.unregister(&repo, force)?;
             eprintln!(
